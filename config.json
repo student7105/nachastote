@@ -1,0 +1,14 @@
+{
+  "_как_пользоваться": "Куда отправлять ответы игроков в конце ночи. Пока action = null — ответы только сохраняются в браузере игрока и копируются кнопкой. Для Google Формы: action = адрес вида https://docs.google.com/forms/d/e/<код>/formResponse, а в fields у каждого вопроса — его номер вида entry.123456789 (Claude достанет их сам по ссылке на форму).",
+  "feedbackForm": {
+    "action": null,
+    "fields": {
+      "result": null,
+      "clear": null,
+      "tense": null,
+      "how": null,
+      "bad": null,
+      "next": null
+    }
+  }
+}

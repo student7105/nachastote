@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>На частоте — прототип</title>
+<link rel="stylesheet" href="fonts.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header id="top">
+  <div class="logo">НА ЧАСТОТЕ <span id="title">Прототип</span></div>
+  <div class="clock" id="clock">23:00</div>
+  <div class="speed" id="speed"></div>
+  <div class="battery" id="battery" hidden>
+    <span id="batName">Батарея</span>
+    <div class="bar"><i id="batFill"></i></div>
+    <span id="batPct">100%</span>
+  </div>
+  <div class="brig" id="brig">Бригада: в части</div>
+  <button id="pauseBtn" class="small" title="Пауза (Esc)">⏸ Пауза</button>
+  <button id="mute" class="small">Звук: вкл</button>
+  <button id="toMenu" class="small">☰ В меню</button>
+</header>
+
+<main id="game">
+  <div id="leftCol">
+    <section id="roomPanel">
+      <div class="room">
+        <svg id="room" viewBox="0 0 1536 640" role="img" aria-label="Комната радиолюбителя"></svg>
+        <div id="fxFlash" aria-hidden="true"></div>
+        <div id="tag">Тишина в эфире</div>
+        <div class="hint" id="hint" hidden></div>
+      </div>
+      <div id="sub" class="sub sys">Эфир молчит.</div>
+    </section>
+
+    <section id="radioPanel" class="metal">
+      <div class="rp-left">
+        <div class="freqWin"><span class="fw"><span id="freq">141.0</span><small>МГц</small></span><canvas id="scope" width="160" height="64" aria-hidden="true"></canvas></div>
+        <div class="tuneRow">
+          <button id="fDown" class="nudge" aria-label="Частота ниже на 0,1">◀</button>
+          <div id="knob" class="knob" title="Крути: тяни мышью влево-вправо или колёсиком" aria-label="Ручка настройки"><i></i></div>
+          <button id="fUp" class="nudge" aria-label="Частота выше на 0,1">▶</button>
+        </div>
+        <input type="range" id="slider" min="1400" max="1500" step="1" value="1410" aria-label="Частота">
+        <div class="signal"><div class="bars" id="bars"><i></i><i></i><i></i><i></i><i></i></div><span id="sigText">тишина</span></div>
+        <div class="switches">
+          <button id="fNoise" class="toggle"><span class="sw"></span>Убрать шум</button>
+          <button id="fBoost" class="toggle"><span class="sw"></span>Усилить фон</button>
+        </div>
+      </div>
+      <div class="rp-right">
+        <div class="morse" id="morse" hidden></div>
+        <div class="bgbox"><span class="label">Фон в эфире:</span> <span id="bgNow">—</span></div>
+        <div id="actions"></div>
+      </div>
+    </section>
+  </div>
+
+  <section id="papers" class="paper">
+    <div class="tabs">
+      <button class="tab on" data-tab="map">Карта</button>
+      <button class="tab" data-tab="notes">Мои записи</button>
+      <button class="tab" data-tab="book">Блокнот деда</button>
+      <button class="tab" data-tab="log">Эфир</button>
+    </div>
+    <div class="tabBody" id="tab-map">
+      <svg id="map" role="img" aria-label="Карта города"></svg>
+      <div class="mapHelp">Клик по карте — поставить точку. Цветные круги — где слышен звук, который ты определил в «Моих записях».</div>
+    </div>
+    <div class="tabBody" id="tab-notes" hidden><div id="notes"></div></div>
+    <div class="tabBody" id="tab-book" hidden><div id="book"></div></div>
+    <div class="tabBody" id="tab-log" hidden><div id="log"></div></div>
+    <div class="paperFoot"><div id="ninaActions"></div></div>
+  </section>
+</main>
+
+<div id="fxDanger" aria-hidden="true"></div>
+
+<!-- главное меню: приветствие → история → ночь → (экран «как играть») -->
+<div id="menu">
+  <div class="mScreen" id="mWelcome">
+    <div class="mLogo">НА ЧАСТОТЕ</div>
+    <div class="mTag">Ищи людей по звукам в эфире</div>
+    <div class="mLamp" aria-hidden="true"></div>
+    <button id="mPower" class="big mBtn">Включить рацию</button>
+    <div class="mSmall">Играть лучше в наушниках</div>
+    <div class="mWarn"><span class="age">12+</span> В игре есть сцены тревоги и опасности для жизни (без показа насилия), редкие яркие вспышки молний, громкие внезапные звуки и жуткая музыка. Если у вас светочувствительная эпилепсия или вы легко пугаетесь, играйте осторожно.
+      <label class="noFlash"><input type="checkbox" data-noflash> Без вспышек</label></div>
+    <button class="mBack" id="mAboutBtn">Об игре</button>
+  </div>
+
+  <div class="mScreen" id="mAbout" hidden>
+    <h2 class="mHead">Об игре</h2>
+    <p class="mAboutText">«На частоте». Все персонажи и события вымышлены, любые совпадения случайны.</p>
+    <button class="mBack" data-back="mWelcome">← Назад</button>
+  </div>
+
+  <div class="mScreen" id="mStories" hidden>
+    <h2 class="mHead">Выбери историю</h2>
+    <div id="mStoryList" class="mList"></div>
+    <button class="mBack" data-back="mWelcome">← Назад</button>
+  </div>
+
+  <div class="mScreen" id="mNights" hidden>
+    <div class="mNotebook">
+      <h2 class="mHead hand" id="mStoryTitle"></h2>
+      <div id="mNightList"></div>
+    </div>
+    <button class="mBack" data-back="mStories">← К историям</button>
+  </div>
+  <div id="menuErr" class="err" hidden></div>
+</div>
+
+<div class="overlay" id="startScreen" hidden>
+  <div class="card">
+    <h1>На частоте <span class="age">12+</span></h1>
+    <p class="sub" id="briefTitle"></p>
+    <p id="briefIntro"></p>
+    <ul>
+      <li>Частота: тяни ручку мышью, колёсико над рацией, стрелки ← → (с Shift — на 1 МГц) или кнопки ◀ ▶.</li>
+      <li>Играть лучше со звуком: звуки на фоне — главные улики.</li>
+      <li id="testNote" hidden>Режим проверки: клавиша <b>F</b> ускоряет всё в 5 раз (голоса при этом выключаются).</li>
+    </ul>
+    <label class="noFlash"><input type="checkbox" data-noflash> Без вспышек молний</label>
+    <details class="briefVol"><summary>Громкость</summary><div id="briefVol"></div></details>
+    <button id="startBtn" class="big">Начать ночь</button>
+    <div id="loadBar" class="loadBar" hidden><i id="loadFill"></i></div>
+    <button id="briefBack" class="mBack inline">← К выбору ночи</button>
+    <div id="loadErr" class="err" hidden></div>
+  </div>
+</div>
+
+<div class="overlay" id="pauseScreen" hidden>
+  <div class="card pauseCard">
+    <h1>Пауза</h1>
+    <p class="sub">Время ночи стоит. Esc или P — продолжить.</p>
+    <h2 class="volHead">Громкость</h2>
+    <div id="pauseVol"></div>
+    <label class="noFlash"><input type="checkbox" data-noflash> Без вспышек молний</label>
+    <div class="endBtns"><button id="pauseGo" class="big">▶ Продолжить</button><button id="pauseMenu" class="big">В меню</button></div>
+  </div>
+</div>
+
+<div class="overlay" id="endScreen" hidden>
+  <div class="card" id="endCard"></div>
+</div>
+
+<script src="engine.js"></script>
+</body>
+</html>
