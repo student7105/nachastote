@@ -417,11 +417,8 @@ async function makeShareCard(st) {
     text(`Не успел найти ${vinit(name)}`, 470, '700 66px "PT Sans", sans-serif', '#ecdfca');
     text('до рассвета', 640, '700 110px Caveat, cursive', '#e0573f', 'rgba(224,87,63,.5)');
   }
-  const lines = [
-    `Поездок впустую: ${st.wasted}`,
-    `Сигнал 4-1-7: ${st.morseHeard ? 'услышал' : 'пропустил'}`,
-  ];
-  lines.forEach((s, i) => text(s, 840 + i * 74, '44px "PT Sans", sans-serif', '#d8c9b0'));
+  // сигнал 4-1-7 на картинку не пишем: это подсказка к следующим ночам (решение Димы)
+  text(`Поездок впустую: ${st.wasted}`, 880, '44px "PT Sans", sans-serif', '#d8c9b0');
   g.strokeStyle = 'rgba(242,178,90,.5)'; g.lineWidth = 3; g.beginPath(); g.moveTo(340, 1035); g.lineTo(740, 1035); g.stroke();
   text(st.saved ? 'А ты найдёшь быстрее?' : 'А ты успеешь?', 1140, '700 92px Caveat, cursive', '#f2b25a');
   text('#начастоте   12+', 1250, '38px "PT Mono", monospace', '#a8977f');
