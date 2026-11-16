@@ -120,11 +120,16 @@ function emit(sc, st) {
   const dur = voiceDur(st.who, st.text);
   const where = hero ? 'hero' : door ? 'door' : sc === S.nina ? 'nina' : 'radio';
   let text = st.text, q = always ? 2 : quality(sc.f10);
-  if (sc.d.battery && !hero && sc.battery < sc.d.battery.low) text = garble(text, 0.15);
+  // чем меньше заряд, тем сильнее рвётся связь (с половины батареи — понемногу, в конце — сильно)
+  if (sc.d.battery && !hero) {
+    const b = sc.battery, p = b < sc.d.battery.low ? 0.18 : b < 50 ? 0.1 * (50 - b) / 50 : 0;
+    if (p) text = garble(text, p);
+  }
   if (q === 2) {
     log(st.who, text, hero ? 'hero' : (sc === S.nina ? 'nina' : 'line'));
     if (!always) A && A.click();
-    voice(st.who, st.text, where === 'radio' || where === 'nina' ? 'radio' : 'clean', hero ? 0.8 : 1);
+    const fade = sc.d.battery && !hero ? 0.55 + 0.45 * sc.battery / 100 : 1;   // садится батарея — голос тише
+    voice(st.who, st.text, where === 'radio' || where === 'nina' ? 'radio' : 'clean', hero ? 0.8 : fade);
     S.speaking = { who: st.who, where, until: S.real + dur };
     if (st.clue) addClue(st.clue);
     if (st.addNote) addNote(st.addNote);
@@ -178,7 +183,7 @@ function updateScene(sc, dt) {
         }
       }
       if (quality(sc.f10) === 2) {
-        sc.status = 'running'; sc.connected = true; sc.queue = [...sc.d.steps]; sc.timer = 0.4; S.hint = null;
+        sc.status = 'running'; sc.connected = true; sc.connAt = S.gm; sc.queue = [...sc.d.steps]; sc.timer = 0.4; S.hint = null;
         dirty.actions = true;
       }
       break;
@@ -190,6 +195,10 @@ function updateScene(sc, dt) {
       if (sc.status === 'running' && !sc.queue.length && sc.timer <= 0 && !sc.waitChoice) {
         if (sc.d.kind === 'caller') {
           sc.status = 'active';
+          // Нина сразу говорит, что время ограничено (срок — конец ночи, виден в шапке рядом с батареей)
+          // а до этого — главное правило ночи (тестеры верили Сергею на слово и проваливали)
+          for (const t of sc.d.ninaOnActive || []) S.nina.queue.push({ who: 'Нина Петровна', text: t });
+          if (sc.d.deadline && sc.d.deadline.nina) S.nina.queue.push({ who: 'Нина Петровна', text: sc.d.deadline.nina });
           setHint('Задавай вопросы (каждый тратит батарею Сергея) или включи «Слушать фон». Услышанные звуки попадают в «Мои записи»: выбери, что это за звук, и на карте появится зона. Где зоны пересекаются — там он.', 25);
         } else sc.status = 'done';
         dirty.actions = true;
@@ -224,6 +233,17 @@ function updateCaller(sc, dt) {
     for (const hnt of sc.d.ninaHints || []) {
       if (sc.hintsDone && sc.hintsDone.has(hnt)) continue;
       if (sc.stuckT >= hnt.after) { (sc.hintsDone = sc.hintsDone || new Set()).add(hnt); S.nina.queue.push({ who: 'Нина Петровна', text: hnt.text }); }
+    }
+  }
+  // Сергей сам торопит: реплики через N игровых минут после того, как ты его нашёл в эфире
+  if (!sc.lost && sc.connAt != null && !replying(sc)) {
+    for (const u of sc.d.urges || []) {
+      if ((sc.urgesDone = sc.urgesDone || new Set()).has(u) || S.gm - sc.connAt < u.after) continue;
+      sc.urgesDone.add(u);
+      const alt = u.ifClue && S.clues[u.ifClue];   // улику уже нашёл — другая реплика, без подсказки
+      sc.battery = Math.max(0, sc.battery - (u.cost || 0));
+      sc.queue.push({ who: sc.d.who, text: alt ? u.alt : u.text });
+      break;
     }
   }
   for (const a of sc.d.auto || []) {
@@ -285,6 +305,7 @@ function startMorse(sc) {
 function updateMorse(sc, dt) {
   sc.mt += dt;
   const q = quality(sc.f10);
+  if (q > 0 && !sc.everNear && sc.d.nearHint) setHint(sc.d.nearHint, 12);   // впервые услышал — успокоить: запишется само
   if (q > 0) sc.everNear = true;
   let on = false;
   while (sc.idx < sc.tl.length && sc.tl[sc.idx].start + sc.tl[sc.idx].dur <= sc.mt) {
@@ -305,12 +326,13 @@ function updateMorse(sc, dt) {
   if (sc.mt >= sc.total) {
     sc.status = 'done'; A && A.setMorse(0); S.morseLive = null;
     const per = sc.d.digits.split('').reduce((n, d) => n + MORSE[d].length, 0);
-    if (sc.heardSyms >= per) {
+    // услышал хоть немного — знаки записываются целиком сами: гоняться за морзянкой во время спасения не нужно
+    if (sc.heardSyms >= per || sc.everNear) {
       S.morseHeard = true;
       const pattern = sc.d.digits.split('').map(d => MORSE[d].replace(/\./g, '·').replace(/-/g, '−')).join('   ');
-      addNote(sc.d.note + ' Знаки: ' + pattern + ' (расшифровка — в Блокноте деда).');
+      addNote(sc.d.note + ' Знаки: ' + pattern + (sc.d.noteTail ? ' ' + sc.d.noteTail : ' (расшифровка — в Блокноте деда).'));
       dirty.actions = true;
-    } else if (sc.everNear) log(null, `[на ${fmtF(sc.f10)} что-то пищало — не разобрал]`, 'miss');
+    }
   }
 }
 
@@ -346,10 +368,27 @@ function arrive() {
     else { const n = d.arrival.near.find(p => dist(b, p) <= p.r); text = n ? n.text : d.arrival.other; }
   }
   S.nina.queue.push({ who: 'Нина Петровна', text });
+  // первая пустая поездка к тому, кто ещё ждёт, — Нина прямо говорит, как искать
+  if (sc && sc.connected && !sc.outcome && S.wasted === 1 && d.arrival.firstMiss) S.nina.queue.push({ who: 'Нина Петровна', text: d.arrival.firstMiss });
   dirty.actions = dirty.map = true;
 }
 
 /* ---------- конец ночи ---------- */
+const END_PICS = ['img/end_win.jpg', 'img/end_lose.jpg'];
+const PICS = {};   // src → загруженная картинка (Image)
+// грузит картинку, при ошибке пробует ещё до 3 раз с паузой; результат запоминается
+function preloadPic(src, tries = 4) {
+  if (PICS[src]) return PICS[src];
+  return PICS[src] = new Promise(ok => {
+    const go = n => {
+      const i = new Image();
+      i.onload = () => ok(i);
+      i.onerror = () => n > 1 ? setTimeout(() => go(n - 1), 1500) : (delete PICS[src], ok(null));
+      i.src = n === tries ? src : src + '?r=' + n;   // повтор — с другим адресом, чтобы не взять ошибку из кэша
+    };
+    go(tries);
+  });
+}
 function endNight() {
   S.ended = true; A && A.stopAll(); fxStop();
   const sc = caller(), saved = sc && sc.outcome === 'saved';
@@ -357,7 +396,7 @@ function endNight() {
   const out =sc ? (saved ? sc.d.outcome.saved.replace('{time}', sc.savedAt) : sc.d.outcome.lost) : '';
   const endPic = saved ? 'img/end_win.jpg' : 'img/end_lose.jpg';
   $('#endCard').innerHTML = `
-    <img class="endPic" src="${endPic}" alt="" onerror="this.remove()">
+    <img class="endPic" id="endPicImg" alt="" hidden>
     <h1>${esc(D.title)} — конец</h1>
     <p class="result ${saved ? 'good' : 'bad'}">Спасено: ${saved ? 1 : 0} из 1</p>
     <p>${esc(out)}</p>
@@ -371,6 +410,8 @@ function endNight() {
       <div class="note" id="shareNote">Рисую картинку…</div></div>
     ${(D.feedback || []).length ? feedbackForm() : ''}
     <div class="endBtns"><button class="big" id="endAgain">Сыграть ещё раз</button><button class="big" id="endMenu">В меню</button></div>`;
+  // картинка конца: уже загружена заранее или догружается с повторами; не вышло — экран без неё
+  preloadPic(endPic).then(img => { const el = $('#endPicImg'); if (img && el) { el.src = img.src; el.hidden = false; } else if (el) el.remove(); });
   $('#endAgain').onclick = () => goTo(D.id);
   $('#endMenu').onclick = () => goTo(null);
   $('#endScreen').hidden = false;
@@ -394,7 +435,8 @@ async function makeShareCard(st) {
   const load = src => new Promise((ok, bad) => { const i = new Image(); i.onload = () => ok(i); i.onerror = bad; i.src = src; });
   try {
     let img, center = 620;
-    try { img = await load(st.pic); center = img.width / 2; } catch (e) { img = await load('img/room.jpg'); }
+    img = await preloadPic(st.pic);
+    if (img) center = img.width / 2; else img = await load('img/room.jpg');
     const k = H / img.height, w = img.width * k, cx = center * k;
     g.drawImage(img, Math.max(W - w, Math.min(0, W / 2 - cx)), 0, w, H);
   } catch (e) { g.fillStyle = '#0d0b0a'; g.fillRect(0, 0, W, H); }
@@ -555,7 +597,15 @@ function render() {
     $('#batFill').style.width = sc.battery + '%';
     $('#batPct').textContent = Math.ceil(sc.battery) + '%';
     bat.classList.toggle('low', sc.battery < sc.d.battery.low);
-  } else bat.hidden = true;
+    // сколько он ещё продержится: до конца ночи (END) в игровых минутах
+    const dl = sc.d.deadline, cold = $('#coldLeft');
+    if (dl && cold) {
+      const left = Math.max(0, Math.ceil(END - S.gm));
+      cold.hidden = false;
+      cold.textContent = `${dl.label} ~${left} мин`;
+      cold.classList.toggle('low', left <= (dl.warn || 15));
+    }
+  } else { bat.hidden = true; const cold = $('#coldLeft'); if (cold) cold.hidden = true; }
   const b = S.brig;
   $('#brig').textContent = 'Бригада: ' + (b.state === 'base' ? 'в части' : b.state === 'travel' ? `едет, ещё ~${Math.max(1, Math.ceil(b.start + b.mins - S.gm))} мин` : 'на месте, ждёт новую точку');
 
@@ -571,8 +621,15 @@ function render() {
 
 // Какие звуки сейчас должны звучать и насколько громко
 function renderAudio(c) {
-  const hiss = (S.noiseOff ? 0.015 : 0.06) * (1 - 0.75 * c);
+  let hiss = (S.noiseOff ? 0.01 : 0.035) * (1 - 0.75 * c);   // было 0.015 / 0.06 — тестерам шум мешал (Дима, 2026-11-16)
+  // батарея Сергея садится — пока он на связи, эфир хрипит сильнее
+  const cl = caller();
+  if (cl && S.bgNow && !cl.lost && !cl.outcome) hiss += 0.03 * Math.max(0, 1 - cl.battery / 60);
   A.setHiss(hiss);
+  // поймал чистый сигнал — короткий щелчок «защёлкнулось»
+  const q = activeSignals().reduce((m, s) => Math.max(m, quality(s.f10)), 0);
+  if (q === 2 && S.lastQ !== 2) A.lock();
+  S.lastQ = q;
   const want = {};
   const boost = S.boost ? 1.5 : 1;
   for (const id of D.roomAmbience || []) want[id + '|clean'] = sndVol(id);
@@ -601,7 +658,10 @@ function tensionNow() {
     if (s.status === 'calling') t = Math.max(t, 0.3);
     if (s.status === 'playing') t = Math.max(t, 0.55);
     if (s.d.kind === 'door' && s.status === 'running') t = Math.max(t, 0.25);
-    if (s.d.kind === 'caller' && s.connected && !s.outcome) t = Math.max(t, s.lost ? 0.8 : 0.35 + 0.55 * (1 - s.battery / 100));
+    if (s.d.kind === 'caller' && s.connected && !s.outcome) {
+      t = Math.max(t, s.lost ? 0.8 : 0.35 + 0.55 * (1 - s.battery / 100));
+      if (s.d.deadline) t = Math.max(t, 1 - (END - S.gm) / 40);   // последние ~40 игровых минут — всё тревожнее
+    }
   }
   if (S.brig.state === 'travel') t += 0.08;
   const cl = caller();
@@ -837,7 +897,7 @@ function makeAudio() {
   const voiceClean = gain(VOL.voice), sfxClean = gain(VOL.sfx);
   voiceClean.connect(master); sfxClean.connect(master);
   const hissG = gain(0), waterG = gain(0), morseG = gain(0), hornG = gain(0);
-  chain(noise(), filt('bandpass', 2500, 0.6), hissG, sfxClean);
+  chain(noise(), filt('bandpass', 2000, 0.6), hissG, sfxClean);   // шипение эфира (2000 Гц — мягче, чем было 2500)
   chain(noise(), filt('lowpass', 450), waterG, sfxClean);
   const mo = ctx.createOscillator(); mo.frequency.value = 720; chain(mo, morseG, sfxClean); mo.start();
   const hl = filt('lowpass', 1200);
@@ -860,11 +920,17 @@ function makeAudio() {
   sh1.frequency.value = 880; sh2.frequency.value = 932.3;
   for (const o of [sh1, sh2]) { o.connect(shF); o.start(); }
   const shG = gain(0); chain(shF, shG, musicG);
+  // средний слой: низкий гул динамик телефона почти не играет, поэтому тревога слышна и тут (малая секунда, медленно «дышит»)
+  const padF = filt('lowpass', 500, 0.8), padG = gain(0);
+  for (const f of [220, 233.08, 329.63]) { const o = ctx.createOscillator(); o.type = 'triangle'; o.frequency.value = f; o.connect(padF); o.start(); }
+  chain(padF, padG, musicG);
+  const padLfo = ctx.createOscillator(), padLfoG = gain(250); padLfo.frequency.value = 0.09; chain(padLfo, padLfoG); padLfoG.connect(padF.frequency); padLfo.start();
   const echo = ctx.createDelay(2), echoFb = gain(0.45), echoOut = gain(0.6);
   echo.delayTime.value = 0.42; echo.connect(echoFb); echoFb.connect(echo); echo.connect(echoOut); echoOut.connect(musicG);
   let tens = 0, nextBeat = 0, nextSting = ctx.currentTime + 25;
   function beat(t, vol) {
-    for (const [f, dt, v] of [[58, 0, 1], [50, 0.2, 0.7]]) {
+    // 58/50 Гц — само сердце; 116/100 Гц — «обертон», чтобы удары было слышно и в телефоне
+    for (const [f, dt, v] of [[58, 0, 1], [50, 0.2, 0.7], [116, 0, 0.45], [100, 0.2, 0.3]]) {
       const o = ctx.createOscillator(), g = gain(0); o.frequency.value = f; chain(o, g, musicG);
       g.gain.setValueAtTime(vol * v, t + dt); g.gain.exponentialRampToValueAtTime(0.0001, t + dt + 0.22); o.start(t + dt); o.stop(t + dt + 0.3);
     }
@@ -933,7 +999,9 @@ function makeAudio() {
       droneF.frequency.setTargetAtTime(150 + 450 * tens, now, 0.5);
       d2.frequency.setTargetAtTime(58.27 + 1.5 * tens, now, 1);
       shG.gain.setTargetAtTime(Math.max(0, tens - 0.4) * 0.035 * duck, now, 0.6);
-      if (tens > 0.5) {
+      padG.gain.setTargetAtTime(Math.max(0, tens - 0.2) * 0.05 * duck, now, 0.8);
+      padF.frequency.setTargetAtTime(400 + 700 * tens, now, 0.8);
+      if (tens > 0.45) {
         if (nextBeat < now) nextBeat = now + 0.1;
         if (nextBeat - now < 0.25) { beat(nextBeat, 0.25 + 0.3 * tens); nextBeat += 60 / (55 + 70 * (tens - 0.5) * 2); }
       }
@@ -970,6 +1038,11 @@ function makeAudio() {
       chain(s, g, mode === 'radio' ? voiceRadio : voiceClean); s.start();
     },
     click() { burst(0.04, 0.3, 3000); },
+    // ---- «тактильные» звуки интерфейса ----
+    tick() { const t = ctx.currentTime; burst(0.012, 0.16, 2600); tone(1900 + Math.random() * 200, t, 0.025, 0.03, 'square'); },   // щелчок ручки на каждые 0,1
+    press() { const t = ctx.currentTime; burst(0.02, 0.22, 1200); tone(150, t, 0.07, 0.18); },                                   // кнопка «проваливается»
+    toggle() { const t = ctx.currentTime; burst(0.015, 0.28, 2000); tone(95, t, 0.09, 0.25); setTimeout(() => burst(0.01, 0.12, 3200), 45); }, // тумблер
+    lock() { const t = ctx.currentTime + 0.02; tone(1320, t, 0.18, 0.025); tone(1980, t + 0.06, 0.22, 0.018); },               // поймал чистый сигнал
     bell(n) { const t0 = ctx.currentTime + 0.1; for (let i = 0; i < Math.min(n, 12); i++) { tone(523, t0 + i * 1.4, 2.5, 0.12); tone(1046, t0 + i * 1.4, 1.2, 0.04); } },
     sfx(name) {
       const t = ctx.currentTime + 0.05;
@@ -978,7 +1051,7 @@ function makeAudio() {
       else if (/хлопа/.test(name)) tone(70, t, 0.25, 0.5);
       else if (/кашель/.test(name)) { burst(0.12, 0.35, 900); setTimeout(() => burst(0.12, 0.3, 800), 260); }
     },
-    stopAll() { set(droneG, 0, 1.5); set(shG, 0, 1); tens = -1e9; set(hissG, 0); set(waterG, 0); set(hornG, 0); morseG.gain.value = 0; for (const L of Object.values(loops)) set(L.g, 0, 0.5); },
+    stopAll() { set(droneG, 0, 1.5); set(shG, 0, 1); set(padG, 0, 1); tens = -1e9; set(hissG, 0); set(waterG, 0); set(hornG, 0); morseG.gain.value = 0; for (const L of Object.values(loops)) set(L.g, 0, 0.5); },
     lastMorse() {
       let t = ctx.currentTime + 1;
       for (const sym of '....- .---- --...') {
@@ -991,7 +1064,22 @@ function makeAudio() {
 }
 
 /* ---------- управление ---------- */
-function setF(v) { const nv = Math.max(1400, Math.min(1500, v)); if (nv !== S.f10) S.tuneT = S.real; S.f10 = nv; dirty.actions = true; }
+function setF(v) {
+  const nv = Math.max(1400, Math.min(1500, v));
+  if (nv !== S.f10) {
+    S.tuneT = S.real;
+    // щелчок на каждое деление; при быстрой прокрутке не чаще раза в 35 мс, чтобы не трещало
+    const now = performance.now();
+    if (A && !(now - (S.lastTick || 0) < 35)) { S.lastTick = now; A.tick(); }
+  }
+  S.f10 = nv; dirty.actions = true;
+}
+// «тактильность»: звук и короткая вибрация (Android) на любую кнопку в игре; тумблеры щёлкают по-своему
+function feel(kind) {
+  if (!A || !S || S.ended) return;
+  kind === 'toggle' ? A.toggle() : A.press();
+  try { navigator.vibrate && navigator.vibrate(kind === 'toggle' ? 12 : 6); } catch (e) { /* нет вибрации — не страшно */ }
+}
 function bindUI() {
   $('#fDown').onclick = () => setF(S.f10 - 1);
   $('#fUp').onclick = () => setF(S.f10 + 1);
@@ -1011,6 +1099,12 @@ function bindUI() {
   for (const ev of ['pointerup', 'pointercancel']) knob.addEventListener(ev, () => { drag = null; });
   $('#fNoise').onclick = () => { S.noiseOff = !S.noiseOff; };
   $('#fBoost').onclick = () => { S.boost = !S.boost; };
+  // нажатие чувствуется сразу, в момент касания (а не когда палец отпущен)
+  document.addEventListener('pointerdown', e => {
+    const b = e.target.closest && e.target.closest('button');
+    if (!b || b.disabled || !b.closest('#radioPanel, #actions, #ninaActions, .tabs')) return;
+    feel(b.classList.contains('toggle') ? 'toggle' : 'press');
+  });
   $('#mute').onclick = () => { S.muted = !S.muted; A && A.mute(S.muted); $('#mute').textContent = 'Звук: ' + (S.muted ? 'выкл' : 'вкл'); };
   $('#map').addEventListener('click', mapClick);
   document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
@@ -1105,7 +1199,7 @@ function menuNoise() {
     for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
     const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
     const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1800; bp.Q.value = 0.6;
-    const g = ctx.createGain(); g.gain.value = 0; g.gain.linearRampToValueAtTime(0.035, ctx.currentTime + 1.5);
+    const g = ctx.createGain(); g.gain.value = 0; g.gain.linearRampToValueAtTime(0.02, ctx.currentTime + 1.5);
     src.connect(bp).connect(g).connect(ctx.destination); src.start();
     MENU_AUDIO = ctx;
   } catch (e) { MENU_AUDIO = null; }
@@ -1206,6 +1300,8 @@ function setupNight() {
       }) : []),
     ]);
     $('#startScreen').hidden = true;
+    // картинки конца ночи грузим заранее, в фоне: в конце сеть может подвести (на телефоне, GitHub из РФ)
+    for (const src of END_PICS) preloadPic(src);
     setInterval(tick, TICK * 1000);
     requestAnimationFrame(fxFrame);
   };
